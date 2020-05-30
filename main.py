@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from os import getenv, remove, popen
 import tarfile
 from pathlib import Path
@@ -88,7 +88,7 @@ endpoint = getenv('endpoint')
 provider = getenv('provider', 'Alibaba')
 _type = getenv('type', 's3')
 name = getenv('name', 'oss')
-
+run_once_immediately = bool(int(getenv('run_once_immediately', 0)))
 OSS_DEST = getenv('OSS_DEST', f'{name}:wachmen-monitor-backup')
 
 
@@ -151,8 +151,8 @@ def keep_files():
     files = sorted(list(source_dir.iterdir()))
     if len(files) > max_files:
         for rf in files[:len(files)-max_files]:
-            # noinspection PyTypeChecker
             logging.info(f"removing {rf}")
+            # noinspection PyTypeChecker
             remove(rf)
 
 
@@ -168,7 +168,9 @@ def main():
 
 
 if __name__ == '__main__':
-    scheduler.add_job(func=main, trigger=trigger, name='rclone to oss', id='1', replace_existing=True)
+    job = scheduler.add_job(func=main, trigger=trigger, name='rclone to oss', id='1', replace_existing=True)
+    if run_once_immediately:
+        job.modify(next_run_time=datetime.now(scheduler.timezone) + timedelta(seconds=10))
     jobs = scheduler.get_jobs()
     logging.info(jobs)
     scheduler.start()
