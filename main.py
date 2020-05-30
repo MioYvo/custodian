@@ -114,7 +114,6 @@ def dump():
             '--skip-extended-insert ' \
             f'--databases {MARIA_DB} {f"--tables {TABLES}" if TABLES else ""} | gzip -9 > ' \
             f'"{file_name}"'
-    print(commd)
     popen(commd)
 
 
