@@ -90,6 +90,7 @@ _type = getenv('type', 's3')
 name = getenv('name', 'oss')
 run_once_immediately = bool(int(getenv('run_once_immediately', 0)))
 OSS_DEST = getenv('OSS_DEST', f'{name}:wachmen-monitor-backup')
+TABLES = getenv('TABLES')
 
 
 def dump():
@@ -111,8 +112,9 @@ def dump():
             f'--user={MARIA_USER} ' \
             f'-p{MARIA_PASS} ' \
             '--skip-extended-insert ' \
-            f'--databases {MARIA_DB} | gzip -9 > ' \
+            f'--databases {MARIA_DB} {f"--tables {TABLES}" if TABLES else ""} | gzip -9 > ' \
             f'"{file_name}"'
+    print(commd)
     popen(commd)
 
 
