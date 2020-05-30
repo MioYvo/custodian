@@ -171,6 +171,5 @@ if __name__ == '__main__':
     job = scheduler.add_job(func=main, trigger=trigger, name='rclone to oss', id='1', replace_existing=True)
     if run_once_immediately:
         job.modify(next_run_time=datetime.now(scheduler.timezone) + timedelta(seconds=10))
-    for _job in scheduler.get_jobs():
-        logging.info(_job.name, _job.next_run_time)
+    logging.info(f"{job.name}: {job.trigger}")
     scheduler.start()
