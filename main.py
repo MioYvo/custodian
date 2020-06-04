@@ -1,5 +1,6 @@
 import logging
-from datetime import datetime
+import signal
+from datetime import datetime, timedelta
 from os import getenv, remove, popen
 import tarfile
 from pathlib import Path
@@ -43,7 +44,7 @@ cron_fields = [
 ]
 cron_trigger_kwargs = {}
 for field in cron_fields:
-    cron_trigger_kwargs[field] = getenv(field, '*')
+    cron_trigger_kwargs[field] = getenv(field, None)
 trigger = CronTrigger(**cron_trigger_kwargs)
 
 jobstores = {
@@ -52,7 +53,7 @@ jobstores = {
 
 job_defaults = {
     'coalesce': True,
-    'max_instances': 1
+    'max_instances': 2
 }
 scheduler = BlockingScheduler(jobstores=jobstores, job_defaults=job_defaults)
 
@@ -93,6 +94,7 @@ provider = getenv('provider', 'Alibaba')
 _type = getenv('type', 's3')
 name = getenv('name', 'oss')
 run_once_immediately = bool(int(getenv('run_once_immediately', 0)))
+run_immediately = bool(int(getenv('run_immediately', 0)))
 OSS_DEST = getenv('OSS_DEST', f'{name}:wachmen-monitor-backup')
 TABLES = getenv('TABLES')
 
@@ -178,13 +180,20 @@ def main():
 if __name__ == '__main__':
     if run_once_immediately:
         main()
-    job = scheduler.add_job(func=main, trigger=trigger, name='rclone to oss', id='1', replace_existing=True)
-    # job.modify(next_run_time=datetime.now(scheduler.timezone) + timedelta(seconds=10))
+    job = scheduler.add_job(
+        func=main, trigger=trigger, name='rclone to oss', id='1', replace_existing=True
+    )
+    if run_immediately:
+        job.modify(next_run_time=datetime.now(tz=scheduler.timezone) + timedelta(seconds=5))
 
     for job in scheduler.get_jobs():
         logging.info(f"{job.name}: {job.trigger}")
 
-    try:
-        scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
+    def handler_stop_signals(signum, frame):
+        logging.info(f'shutdown from stop signum: {signum}')
         scheduler.shutdown()
+
+    signal.signal(signal.SIGINT, handler_stop_signals)
+    signal.signal(signal.SIGTERM, handler_stop_signals)
+
+    scheduler.start()
