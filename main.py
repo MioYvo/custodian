@@ -1,16 +1,22 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from os import getenv, remove, popen
 import tarfile
 from pathlib import Path
 import time
 
+import sentry_sdk
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
-from pytz import utc
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from apscheduler.executors.pool import ThreadPoolExecutor
+
+SENTRY_KEY = getenv("SENTRY_KEY", "")
+if SENTRY_KEY:
+    sentry_sdk.init(
+        dsn=SENTRY_KEY,
+    )
+
 
 DEFAULT_FORMAT = "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d] %(message)s"  # noqa: E501
 DEFAULT_DATE_FORMAT = "%y%m%d %H:%M:%S"
@@ -43,14 +49,12 @@ trigger = CronTrigger(**cron_trigger_kwargs)
 jobstores = {
     'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')
 }
-executors = {
-    'default': ThreadPoolExecutor(1)
-}
+
 job_defaults = {
     'coalesce': True,
     'max_instances': 1
 }
-scheduler = BlockingScheduler(jobstores=jobstores, executors=executors, job_defaults=job_defaults, timezone=utc)
+scheduler = BlockingScheduler(jobstores=jobstores, job_defaults=job_defaults)
 
 MARIA_USER = getenv('MARIA_USER')
 if not MARIA_USER:
@@ -160,17 +164,27 @@ def keep_files():
 def main():
     if not (source_dir.exists() or source_dir.is_dir()):
         source_dir.mkdir(parents=True, exist_ok=True)
-
-    dump()
-    time.sleep(1)
-    keep_files()
-    time.sleep(1)
-    sync()
+    try:
+        dump()
+        time.sleep(1)
+        keep_files()
+        time.sleep(1)
+        sync()
+    except Exception as e:
+        logging.error(e)
+        pass
 
 
 if __name__ == '__main__':
-    job = scheduler.add_job(func=main, trigger=trigger, name='rclone to oss', id='1', replace_existing=True)
     if run_once_immediately:
-        job.modify(next_run_time=datetime.now(scheduler.timezone) + timedelta(seconds=10))
-    logging.info(f"{job.name}: {job.trigger}")
-    scheduler.start()
+        main()
+    job = scheduler.add_job(func=main, trigger=trigger, name='rclone to oss', id='1', replace_existing=True)
+    # job.modify(next_run_time=datetime.now(scheduler.timezone) + timedelta(seconds=10))
+
+    for job in scheduler.get_jobs():
+        logging.info(f"{job.name}: {job.trigger}")
+
+    try:
+        scheduler.start()
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
