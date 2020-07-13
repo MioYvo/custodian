@@ -1,16 +1,23 @@
 import logging
+import signal
 from datetime import datetime, timedelta
 from os import getenv, remove, popen
 import tarfile
 from pathlib import Path
 import time
 
+import sentry_sdk
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
-from pytz import utc
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
-from apscheduler.executors.pool import ThreadPoolExecutor
+
+SENTRY_KEY = getenv("SENTRY_KEY", "")
+if SENTRY_KEY:
+    sentry_sdk.init(
+        dsn=SENTRY_KEY,
+    )
+
 
 DEFAULT_FORMAT = "[%(levelname)1.1s %(asctime)s %(module)s:%(lineno)d] %(message)s"  # noqa: E501
 DEFAULT_DATE_FORMAT = "%y%m%d %H:%M:%S"
@@ -37,20 +44,18 @@ cron_fields = [
 ]
 cron_trigger_kwargs = {}
 for field in cron_fields:
-    cron_trigger_kwargs[field] = getenv(field, '*')
+    cron_trigger_kwargs[field] = getenv(field, None)
 trigger = CronTrigger(**cron_trigger_kwargs)
 
 jobstores = {
     'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')
 }
-executors = {
-    'default': ThreadPoolExecutor(1)
-}
+
 job_defaults = {
     'coalesce': True,
-    'max_instances': 1
+    'max_instances': 2
 }
-scheduler = BlockingScheduler(jobstores=jobstores, executors=executors, job_defaults=job_defaults, timezone=utc)
+scheduler = BlockingScheduler(jobstores=jobstores, job_defaults=job_defaults)
 
 MARIA_USER = getenv('MARIA_USER')
 if not MARIA_USER:
@@ -89,6 +94,7 @@ provider = getenv('provider', 'Alibaba')
 _type = getenv('type', 's3')
 name = getenv('name', 'oss')
 run_once_immediately = bool(int(getenv('run_once_immediately', 0)))
+run_immediately = bool(int(getenv('run_immediately', 0)))
 OSS_DEST = getenv('OSS_DEST', f'{name}:wachmen-monitor-backup')
 TABLES = getenv('TABLES')
 
@@ -160,17 +166,34 @@ def keep_files():
 def main():
     if not (source_dir.exists() or source_dir.is_dir()):
         source_dir.mkdir(parents=True, exist_ok=True)
-
-    dump()
-    time.sleep(1)
-    keep_files()
-    time.sleep(1)
-    sync()
+    try:
+        dump()
+        time.sleep(1)
+        keep_files()
+        time.sleep(1)
+        sync()
+    except Exception as e:
+        logging.error(e)
+        pass
 
 
 if __name__ == '__main__':
-    job = scheduler.add_job(func=main, trigger=trigger, name='rclone to oss', id='1', replace_existing=True)
     if run_once_immediately:
-        job.modify(next_run_time=datetime.now(scheduler.timezone) + timedelta(seconds=10))
-    logging.info(f"{job.name}: {job.trigger}")
+        main()
+    job = scheduler.add_job(
+        func=main, trigger=trigger, name='rclone to oss', id='1', replace_existing=True
+    )
+    if run_immediately:
+        job.modify(next_run_time=datetime.now(tz=scheduler.timezone) + timedelta(seconds=5))
+
+    for job in scheduler.get_jobs():
+        logging.info(f"{job.name}: {job.trigger}")
+
+    def handler_stop_signals(signum, frame):
+        logging.info(f'shutdown from stop signum: {signum}')
+        scheduler.shutdown()
+
+    signal.signal(signal.SIGINT, handler_stop_signals)
+    signal.signal(signal.SIGTERM, handler_stop_signals)
+
     scheduler.start()
