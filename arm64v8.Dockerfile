@@ -1,12 +1,12 @@
-FROM python:alpine
+FROM arm64v8/python:3.10-alpine
 
 FROM python:alpine
 
 COPY requirements.txt /custodian/
 #COPY rclone-current-linux-amd64.zip /
 
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
-    && apk add -u --no-cache tzdata mariadb-client \
+# RUN #sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \ &&  \
+RUN  apk add -u --no-cache tzdata mariadb-client \
     && apk add --no-cache --virtual .build-deps \
     curl \
     && mkdir /tmp_unzip_dir_for_rclone \
@@ -19,7 +19,8 @@ RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
     && mv /usr/bin/rclone.new /usr/bin/rclone \
     && cd / \
     && rm -rf /tmp_unzip_dir_for_rclone \
-    && pip install -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir -r /custodian/requirements.txt \
+#    && pip install -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir -r /custodian/requirements.txt \
+    && pip install --no-cache-dir -r /custodian/requirements.txt \
     && apk del --no-cache --purge .build-deps
 
 COPY . /custodian
